@@ -2,7 +2,10 @@ import random
 import string
 import pandas as pd
 import numpy as np
+
+
 from globalvar import *
+
 #Continuous Adaptive Power Manager using default ENO class
 class CAPM (object):
     def __init__(self,location='tokyo', year=2010, shuffle=False, trainmode=False):
@@ -14,7 +17,7 @@ class CAPM (object):
         self.BOPT = 0.5 * self.BMAX    #Optimal Battery Level. Assuming 50% of battery is the optimum
         
         self.HMIN = 0      #Minimum energy that can be harvested by the solar panel.
-        self.HMAX = 500   #Maximum energy that can be harvested by the solar panel. [500mW]
+        self.HMAX = None   #Maximum energy that can be harvested by the solar panel. [500mW]
         
         self.DMAX = 500      #Maximum energy that can be consumed by the node in one time step. [~ 3.6V x 135mA]
         self.N_ACTIONS = 10  #No. of different duty cycles possible
@@ -31,7 +34,7 @@ class CAPM (object):
         self.year = year
         self.shuffle = shuffle
         self.trainmode = trainmode
-        self.eno = ENO(self.location, self.year, shuffle=shuffle, day_balance=trainmode) #if trainmode is enable, then days are automatically balanced according to daytype i.e. day_balance= True
+#         self.eno = ENO(self.location, self.year, shuffle=shuffle, day_balance=trainmode) #if trainmode is enable, then days are automatically balanced according to daytype i.e. day_balance= True
         
         self.violation_flag = False
 
@@ -49,7 +52,7 @@ class CAPM (object):
         self.binit = self.batt
         self.btrack = np.append(self.btrack, self.batt) #track battery levels
         
-        self.enp = self.binit - self.batt #enp is calculated
+        self.enp = self.BOPT - self.batt #enp is calculated
         self.henergy = np.clip(henergy, self.HMIN, self.HMAX) #clip henergy within HMIN and HMAX
         self.fcast = fcast
         
@@ -73,42 +76,17 @@ class CAPM (object):
         return c_state
 
     #reward function
+    #only dependent on ENP w.r.t BOPT
     def rewardfn(self):
-        #REWARD AS A FUNCTION OF ENP
-        if(np.abs(self.enp) <= 3*self.DMAX): #if enp is within 4*DMAX. DMAX is used instead of BMAX. This margin is required for the node to operate. THe factor 4 is empirically determined
-            norm_reward = 1 - 4*(np.abs(self.enp)/self.BMAX) #good reward
+        R_PARAM = 20000 #chosen empirically for best results
+        mu = 0
+        sig = 0.05*R_PARAM #knee curve starts at approx. 2000mWhr of deviation
+        
+        if(np.abs(self.enp) <= 0.12*R_PARAM):
+            norm_reward = (np.exp(-np.power((self.enp - mu)/sig, 2.)/2) / np.exp(-np.power((0 - mu)/sig, 2.)/2))
         else:
-            norm_reward = 0.1 - 2*np.abs(self.enp/self.BMAX) #if enp = 0.5*BMAX, reward = -1
-
-        #TAKING BATTERY SAFE LEVELS INTO ACCOUNT    
-        if not(0.3*self.BMAX <= self.batt <= 0.7*self.BMAX): #if battery is not within safe limits (i.e. 20% to 80% of BMAX)
-            norm_reward /= 2 # ENP reward/penalties are suppressed because 
-                             # if battery is outside safe limits, we are more concerned with getting back to safer limits than maintaining ENP
-
-#         R_PARAM = 20000 #chosen empirically for best results
-#         mu = 0
-#         sig = 0.05*R_PARAM #knee curve starts at approx. 2000mWhr of deviation
-        
-#         if(np.abs(self.enp) <= 0.12*R_PARAM):
-#             norm_reward = (np.exp(-np.power((self.enp - mu)/sig, 2.)/2) / np.exp(-np.power((0 - mu)/sig, 2.)/2))
-#         else:
-#             norm_reward = -0.25 - 2.5*np.abs(self.enp/R_PARAM)
-        
-        #REWARD AS A FUNCTION OF BATTERY VIOLATIONS
-        if(self.violation_flag):
-                norm_reward = norm_reward - 1 #penalty for violating battery limits anytime during the day
-                
-        #PENALTY AS A FUNCTION OF DAILY MEAN VALUE OF BATTERY
-        bmean = np.mean(self.btrack)
-        bdev = np.abs(self.BOPT - bmean)/self.BMAX
-        if (bdev <= 0.1):
-            penalty = 0
-        else:
-            VTh = 0.2
-            penalty = np.exp(bdev/VTh)/np.exp(0.35/VTh) # max penalty is 1 when mean battery deviates by 50% of BMAX. 
-#                                                      # deviations of uptop 10% of BMAX have little effect only 0.13 penalty
-        
-        return (norm_reward - penalty)
+            norm_reward = -0.25 - 2.5*np.abs(self.enp/R_PARAM)
+        return (norm_reward)
         
     
     def step(self, action):
@@ -126,7 +104,7 @@ class CAPM (object):
         self.btrack = np.append(self.btrack, self.batt) #track battery levels
 
         
-        self.enp = self.binit - self.batt
+        self.enp = self.BOPT - self.batt
         
         #proceed to the next time step
         self.henergy, self.fcast, day_end, year_end = self.eno.step()

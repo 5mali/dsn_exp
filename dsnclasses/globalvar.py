@@ -9,4 +9,3 @@ MEMORY_CAPACITY = 24*7*4*6      # store upto six month worth of memory
 
 N_ACTIONS = 10 #no. of duty cycles (0,1,2,3,4)
 N_STATES = 3 #number of state space parameter [batt, enp, henergy]
-HIDDEN_LAYER = 50
